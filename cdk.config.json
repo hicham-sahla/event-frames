@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/@ixon-cdk/core/config/schema.json",
+  "prefix": "pct",
+  "components": {
+    "event-frames": {
+      "runner": {
+        "build": {
+          "builder": "@ixon-cdk/svelte-builder:browser",
+          "input": "event-frames.svelte"
+        }
+      }
+    }
+  }
+}
