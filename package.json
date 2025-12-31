@@ -20,6 +20,10 @@
     "@ixon-cdk/simulator": "^1.10.0",
     "@ixon-cdk/svelte-builder": "^1.21.0",
     "@ixon-cdk/templates": "^1.10.0",
-    "@ixon-cdk/types": "^1.21.0"
+    "@ixon-cdk/types": "^1.21.0",
+    "@types/luxon": "^3.7.1"
+  },
+  "dependencies": {
+    "luxon": "^3.7.2"
   }
 }
