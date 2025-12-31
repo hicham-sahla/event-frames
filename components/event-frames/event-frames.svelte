@@ -219,22 +219,71 @@
     hasMoreData = true;
     loadInitialData();
   }
+  // Helper function to strip HTML tags
+  function stripHtml(html: string): string {
+    if (!html) return "";
+    return html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&nbsp;/g, " ")
+      .trim();
+  }
 
+  // Helper function to truncate ID
+  function truncateId(id: string): string {
+    if (!id) return "";
+    return id.length > 9 ? id.substring(0, 9) + ".." : id;
+  }
+
+  // Helper function to format category
+  function formatCategory(category: string | null): string {
+    if (!category) return "Uncategorized";
+    if (category === "Stack inspection") return "Stack visual inspection";
+    return category;
+  }
   function selectNote(note: NoteDisplay) {
-    if (!note || !note.occurredOn || !note.occurredOn.fullDate) {
+    if (!note) {
       console.error("Invalid note data for selection");
       return;
     }
-    const startTime = DateTime.fromISO(note.occurredOn.fullDate, {
+
+    // Use performed_on if available, otherwise use created_on (occurredOn)
+    let dateToUse: string;
+
+    if (note.severity && note.severity !== "N/A") {
+      // severity contains performed_on formatted date, we need the full ISO
+      // We need to get it from occurredOn since that's what we have
+      // Actually, let's parse from the formatted date or use occurredOn
+      dateToUse = note.occurredOn.fullDate;
+
+      // Try to find a valid performed_on date
+      const performedOnDate = DateTime.fromFormat(
+        note.severity,
+        "dd-MM-yyyy HH:mm",
+        {
+          zone: context.appData.timeZone,
+        }
+      );
+
+      if (performedOnDate.isValid) {
+        dateToUse = performedOnDate.toISO()!;
+      }
+    } else {
+      dateToUse = note.occurredOn.fullDate;
+    }
+
+    const startTime = DateTime.fromISO(dateToUse, {
       zone: context.appData.timeZone,
     });
+
     if (!startTime.isValid) {
-      console.error(
-        "Failed to parse start time from selected note:",
-        note.occurredOn.fullDate
-      );
+      console.error("Failed to parse start time from selected note");
       return;
     }
+
     const endTime = startTime.plus({ hours: 1 });
     context.setTimeRange({
       from: startTime.toMillis(),
@@ -792,16 +841,20 @@
             <thead>
               <tr>
                 <th class="id-column">ID</th>
-                <th class="key-column">Category & Author</th>
-                <th class="key-column">Created On</th>
-                <th class="key-column">Performed On</th>
+                <th>Author</th>
+                <th>Category</th>
+                <th class="content-column">Content</th>
+                <th>Created On</th>
+                <th>Performed On</th>
               </tr>
             </thead>
             <tbody>
               {#each filteredNotes as note (note.publicId)}
                 <tr on:click={() => selectNote(note)} class="ripple">
                   <td class="id-column">
-                    <span>{note.publicId}</span>
+                    <span title={note.publicId}
+                      >{truncateId(note.publicId)}</span
+                    >
                     <button
                       class="copy-button {copySuccess[note.publicId]
                         ? 'success'
@@ -837,7 +890,11 @@
                       {/if}
                     </button>
                   </td>
-                  <td>{note.name}</td>
+                  <td>{note.author_name}</td>
+                  <td>{formatCategory(note.note_category)}</td>
+                  <td class="content-column" title={stripHtml(note.text)}
+                    >{stripHtml(note.text)}</td
+                  >
                   <td>{formatDateForTable(note.occurredOn.fullDate)}</td>
                   <td>{note.severity}</td>
                 </tr>
@@ -846,7 +903,7 @@
             {#if isLoadingMore}
               <tfoot>
                 <tr>
-                  <td colspan="4" style="text-align: center; padding: 10px;">
+                  <td colspan="6" style="text-align: center; padding: 10px;">
                     <div
                       class="spinner"
                       style="display: inline-block; width: 24px; height: 24px;"
@@ -989,6 +1046,13 @@
     vertical-align: middle;
   }
   .id-column {
-    min-width: 200px;
+    min-width: 100px;
+    max-width: 120px;
+  }
+  .content-column {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>
