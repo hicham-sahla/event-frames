@@ -20,14 +20,14 @@ export class NotesManager {
     pageSize: number = 50,
     pageAfter?: string,
     searchQuery?: string,
-    forceFresh: boolean = false
+    forceFresh: boolean = false,
   ): Promise<{ notes: NoteDisplay[]; moreAfter?: string }> {
     try {
       const result = await this.apiService.getFlatSortedNotes(
         pageSize,
         pageAfter,
         searchQuery,
-        forceFresh
+        forceFresh,
       );
 
       return result;
@@ -86,9 +86,9 @@ export class NotesManager {
 
     return {
       fullDate: dt.toISO()!,
-      dateOnly: dt.toFormat("dd-MM-yyyy"),
+      dateOnly: dt.toFormat("MM-dd-yyyy"), // was "dd-MM-yyyy"
       timeOnly: dt.toFormat("HH:mm"),
-      formattedDate: dt.toFormat("dd-MM-yyyy HH:mm"),
+      formattedDate: dt.toFormat("MM-dd-yyyy HH:mm"), // was "dd-MM-yyyy HH:mm"
     };
   }
 }

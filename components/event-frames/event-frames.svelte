@@ -50,13 +50,65 @@
 
   let minuteAdjustment: number = 15;
   let adjustmentTarget: "from" | "to" = "from";
+  // Add this configuration near the top of your script section, after the imports
 
+  interface CategoryTimeFrame {
+    before: { months?: number; weeks?: number; days?: number };
+    after: { months?: number; weeks?: number; days?: number };
+  }
+
+  const categoryTimeFrames: Record<string, CategoryTimeFrame> = {
+    Calibration: {
+      before: { months: 3 },
+      after: { weeks: 1 },
+    },
+    "Software update": {
+      before: { weeks: 1 },
+      after: { weeks: 1 },
+    },
+    "Settings change": {
+      before: { days: 1 },
+      after: { days: 1 },
+    },
+    "Stack replacements": {
+      before: { months: 3 },
+      after: { months: 1 },
+    },
+    "Stack inspection": {
+      before: { months: 3 },
+      after: {},
+    },
+    "Stack tensioning": {
+      before: { months: 1 },
+      after: { months: 1 },
+    },
+    "Stack installs": {
+      before: {},
+      after: { months: 3 },
+    },
+    Other: {
+      before: { days: 1 },
+      after: { days: 1 },
+    },
+    Uncategorized: {
+      before: { days: 1 },
+      after: { days: 1 },
+    },
+  };
+
+  // Helper function to get time frame for a category
+  function getCategoryTimeFrame(category: string | null): CategoryTimeFrame {
+    if (!category) {
+      return categoryTimeFrames["Uncategorized"];
+    }
+    return categoryTimeFrames[category] || categoryTimeFrames["Uncategorized"];
+  }
   onMount(async () => {
     notesManager = new NotesManager(context);
     translations = context.translate(
       ["SEARCH", "NO_OCCURRENCES_FOUND", "OCCURRENCES", "ACTIVE_SINCE"],
       undefined,
-      { source: "global" }
+      { source: "global" },
     );
 
     if (context) {
@@ -77,7 +129,7 @@
                 .toLowerCase();
             }
           }
-        }
+        },
       );
     } else {
       console.error("Context is not initialized.");
@@ -106,7 +158,7 @@
         pageSize,
         undefined,
         search.trim() !== "" ? search : undefined,
-        forceFresh
+        forceFresh,
       );
 
       notesList = result.notes;
@@ -119,13 +171,13 @@
           pageSize,
           undefined,
           undefined,
-          forceFresh
+          forceFresh,
         );
 
         notesList = filterNotes(
           backupResult.notes,
           search,
-          context.appData.timeZone
+          context.appData.timeZone,
         );
 
         if (notesList.length > 0) {
@@ -170,7 +222,7 @@
       const result = await notesManager.getGloballySortedNotes(
         pageSize,
         currentPageAfter,
-        search.trim() !== "" ? search : undefined
+        search.trim() !== "" ? search : undefined,
       );
 
       const newNotes = result.notes;
@@ -250,46 +302,78 @@
       return;
     }
 
-    // Use performed_on if available, otherwise use created_on (occurredOn)
     let dateToUse: string;
 
-    if (note.severity && note.severity !== "N/A") {
-      // severity contains performed_on formatted date, we need the full ISO
-      // We need to get it from occurredOn since that's what we have
-      // Actually, let's parse from the formatted date or use occurredOn
-      dateToUse = note.occurredOn.fullDate;
-
-      // Try to find a valid performed_on date
+    // Prioritize performed_on (severity) over created_on (occurredOn)
+    if (
+      note.severity &&
+      note.severity !== "N/A" &&
+      note.severity !== "No Date Provided"
+    ) {
       const performedOnDate = DateTime.fromFormat(
         note.severity,
-        "dd-MM-yyyy HH:mm",
-        {
-          zone: context.appData.timeZone,
-        }
+        "MM-dd-yyyy HH:mm", // Updated to match new format
+        { zone: context.appData.timeZone },
       );
 
       if (performedOnDate.isValid) {
         dateToUse = performedOnDate.toISO()!;
+      } else {
+        // Fallback to created_on only if performed_on parsing fails
+        console.warn(
+          "Failed to parse performed_on date, falling back to created_on:",
+          note.severity,
+        );
+        dateToUse = note.occurredOn.fullDate;
       }
     } else {
+      // No performed_on available, use created_on
       dateToUse = note.occurredOn.fullDate;
     }
 
-    const startTime = DateTime.fromISO(dateToUse, {
+    const eventTime = DateTime.fromISO(dateToUse, {
       zone: context.appData.timeZone,
     });
 
-    if (!startTime.isValid) {
-      console.error("Failed to parse start time from selected note");
+    if (!eventTime.isValid) {
+      console.error("Failed to parse event time from selected note");
       return;
     }
 
-    const endTime = startTime.plus({ hours: 1 });
+    // Get category-specific time frame
+    const timeFrame = getCategoryTimeFrame(note.note_category);
+
+    // Calculate start time (before the event)
+    let startTime = eventTime.minus({
+      months: timeFrame.before.months || 0,
+      weeks: timeFrame.before.weeks || 0,
+      days: timeFrame.before.days || 0,
+    });
+
+    // Calculate end time (after the event)
+    let endTime = eventTime.plus({
+      months: timeFrame.after.months || 0,
+      weeks: timeFrame.after.weeks || 0,
+      days: timeFrame.after.days || 0,
+    });
+
+    // Cap end time to now if it's in the future
+    const now = DateTime.now().setZone(context.appData.timeZone);
+    if (endTime > now) {
+      endTime = now;
+    }
+
+    // Safety: ensure start is not after end
+    if (startTime > endTime) {
+      startTime = endTime.minus({ hours: 1 });
+    }
+
     context.setTimeRange({
       from: startTime.toMillis(),
       to: endTime.toMillis(),
     });
-    localStorage.setItem("snapshot-date", startTime.toISO());
+
+    localStorage.setItem("snapshot-date", eventTime.toISO());
   }
 
   function incrementTimeRange() {
@@ -389,9 +473,8 @@
   function formatDateForDisplay(isoDate: string): string {
     if (!isoDate) return "Invalid date";
     const dt = DateTime.fromISO(isoDate);
-    return dt.isValid ? dt.toFormat("dd/MM/yyyy HH:mm") : "Invalid date";
+    return dt.isValid ? dt.toFormat("MM/dd/yyyy HH:mm") : "Invalid date";
   }
-
   function closeExportDialog(): void {
     showExportDialog = false;
     exportInProgress = false;
@@ -425,7 +508,7 @@
           batchSize,
           pageAfter,
           undefined,
-          false
+          false,
         );
         allNotes = [...allNotes, ...result.notes];
 
@@ -453,7 +536,7 @@
 
   async function exportNotesInDateRange(
     startDate: string,
-    endDate: string
+    endDate: string,
   ): Promise<NoteDisplay[]> {
     const start = DateTime.fromISO(startDate);
     const end = DateTime.fromISO(endDate);
@@ -474,7 +557,7 @@
           batchSize,
           pageAfter,
           undefined,
-          false
+          false,
         );
 
         if (result.notes.length === 0) {
@@ -542,7 +625,7 @@
         }
         notesToExport = await exportNotesInDateRange(
           exportStartDate,
-          exportEndDate
+          exportEndDate,
         );
       }
 
@@ -568,9 +651,9 @@
               typeof cell === "string" &&
               (cell.includes(",") || cell.includes('"') || cell.includes("\n"))
                 ? `"${cell.replace(/"/g, '""')}"`
-                : cell
+                : cell,
             )
-            .join(",")
+            .join(","),
         )
         .join("\n");
 
@@ -581,8 +664,8 @@
       link.setAttribute(
         "download",
         `notes-export-${agentName}-${DateTime.now().toFormat(
-          "yyyyMMdd-HHmmss"
-        )}.csv`
+          "yyyyMMdd-HHmmss",
+        )}.csv`,
       );
       link.style.visibility = "hidden";
       document.body.appendChild(link);
@@ -594,7 +677,7 @@
       console.error("Export failed:", error);
       alert(
         "Export failed: " +
-          (error instanceof Error ? error.message : "Unknown error")
+          (error instanceof Error ? error.message : "Unknown error"),
       );
       exportInProgress = false;
     }
@@ -607,7 +690,7 @@
   function formatDateForTable(dateString: string | undefined): string {
     if (!dateString) return "No Date";
     const dt = DateTime.fromISO(dateString);
-    return dt.isValid ? dt.toFormat("dd/MM/yyyy, HH:mm") : "Invalid Date";
+    return dt.isValid ? dt.toFormat("MM/dd/yyyy, HH:mm") : "Invalid Date";
   }
 
   let refreshButtonEl: HTMLButtonElement;
@@ -637,7 +720,7 @@
     if (fromDateInputSwitchEl)
       context.createTooltip(
         fromDateInputSwitchEl.parentElement as HTMLElement,
-        { message: "Toggle to adjust start or end date" }
+        { message: "Toggle to adjust start or end date" },
       );
     if (exportCsvButtonEl)
       context.createTooltip(exportCsvButtonEl, {
